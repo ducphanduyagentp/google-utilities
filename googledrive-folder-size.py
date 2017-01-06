@@ -25,9 +25,22 @@ def createService(service, creds):
 
 
 def calculateFolderSize(drive, folder_id):
+    nFiles = 0
     q = "'{}' in parents".format(folder_id)
-    folder = drive.files().list(q=q, fields='files(size)').execute()
+    folder = drive.files().list(q=q, fields='nextPageToken, files(size)', pageSize=1000).execute()
     x = sum([int(gFile['size']) for gFile in folder['files']])
+    nFiles += len(folder['files'])
+    if 'nextPageToken' in folder:
+        nextPageToken = folder['nextPageToken']
+        while True:
+            folder = drive.files().list(q=q, pageToken=nextPageToken, fields='nextPageToken, files(size)', pageSize=1000).execute()
+            x += sum([int(gFile['size']) for gFile in folder['files']])
+            nFiles += len(folder['files'])
+            if not 'nextPageToken' in folder:
+                break
+            nextPageToken = folder['nextPageToken']
+            
+    print('Number of files: {}'.format(nFiles))
     print('Folder Size:')
     print('{} b'.format(x))
     print('{} kB'.format(round(x / 1024.0)))
