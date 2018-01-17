@@ -2,14 +2,16 @@ from __future__ import print_function
 from apiclient import discovery
 from httplib2 import Http
 from oauth2client import file, client, tools
-import datetime
-import time
 from subprocess import call, check_call, check_output
 from googleapiclient.http import MediaFileUpload
 
+import time
+import datetime
+import math
+
 PREFIX = 'https://www.googleapis.com/auth/'
 SCOPES = ['drive', 'drive.file', 'drive.metadata.readonly']
-
+sizeSuffix = ['B', 'kB', 'MB', 'GB', 'TB']
 def authorizeUser():
     store = file.Storage('storage.json')
     creds = store.get()
@@ -23,33 +25,39 @@ def createService(service, creds):
     SERVICE = discovery.build(service, 'v3', http=creds.authorize(Http()))
     return SERVICE
 
+def getFolderInfo(drive, folderID):
+    q = "'{}' in parents".format(folderID)
+    gdriveFolder = drive.files().list(q=q, fields='nextPageToken, files', pageSize=1000).execute()
 
-def calculateFolderSize(drive, folder_id):
+    subFolders = []
+    files = []
     nFiles = 0
-    q = "'{}' in parents".format(folder_id)
-    folder = drive.files().list(q=q, fields='nextPageToken, files(size)', pageSize=1000).execute()
-    x = sum([int(gFile['size']) for gFile in folder['files']])
-    nFiles += len(folder['files'])
-    if 'nextPageToken' in folder:
-        nextPageToken = folder['nextPageToken']
-        while True:
-            folder = drive.files().list(q=q, pageToken=nextPageToken, fields='nextPageToken, files(size)', pageSize=1000).execute()
-            x += sum([int(gFile['size']) for gFile in folder['files']])
-            nFiles += len(folder['files'])
-            if not 'nextPageToken' in folder:
-                break
-            nextPageToken = folder['nextPageToken']
-            
-    print('Number of files: {}'.format(nFiles))
-    print('Folder Size:')
-    print('{} b'.format(x))
-    print('{} kB'.format(round(x / 1024.0)))
-    print('{} MB'.format(round(x / 1024.0 ** 2)))
-    print('{} GB'.format(round(x / 1024.0 ** 3)))
+    nFolders = 0
+    folderSize = 0
+
+    while True:
+        subFolders += [entry['id'] for entry in gdriveFolder['files'] if 'folder' in entry['mimeType']]
+	files += [entry for entry in gdriveFolder['files'] if 'folder' not in entry['mimeType']]
+        if 'nextPageToken' not in gdriveFolder:
+            break
+        gdriveFolder = drive.files().list(q=q, pageToken=gdriveFolder['nextPageToken'], fields='nextPageToken, files', pageSize=1000).execute()
+    nFolders += len(subFolders)
+    nFiles += len(files)
+    folderSize += sum([int(entry['size']) for entry in files if 'size' in entry])
+    for folder in subFolders:
+        cFiles, cFolders, cFolderSize = getFolderInfo(drive, folder)
+        nFiles += cFiles
+        nFolders += cFolders
+        folderSize += cFolderSize
+
+    return (nFiles, nFolders, folderSize)
 
 for i in range(len(SCOPES)):
     SCOPES[i] = PREFIX + SCOPES[i]
 creds = authorizeUser()
 drive = createService('drive', creds)
-folder_id = input("Folder ID? ")
-calculateFolderSize(drive, folder_id)
+while True:
+	folderID = str(raw_input("Folder ID? "))
+	a, b, c = getFolderInfo(drive, folderID)
+	idx = int(math.log(c, 1024))
+	print('{} files, {} folders, {:.2f} {}'.format(a, b, c / (1024.0 ** idx), sizeSuffix[idx]))
